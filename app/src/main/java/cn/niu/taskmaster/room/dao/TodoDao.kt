@@ -19,7 +19,7 @@ import cn.niu.taskmaster.entity.TodoItem
 interface TodoDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun addTodoItems(items: List<TodoDao>)
+    suspend fun addTodoItems(items: List<TodoItem>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun addTodoItem(item: TodoItem)

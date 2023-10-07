@@ -43,6 +43,8 @@ dependencies {
     implementation(libs.appcompat)
     implementation(libs.material)
     implementation(libs.li.utils)
+    implementation(libs.bundles.coroutines)
+    implementation(libs.bundles.viewModel)
     implementation(libs.room.ktx)
     implementation(libs.room.runtime)
     ksp(libs.room.compiler)

@@ -3,6 +3,7 @@ package cn.niu.taskmaster.entity
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import com.squareup.moshi.JsonClass
 
 /**
  * 待办实体
@@ -10,13 +11,16 @@ import androidx.room.PrimaryKey
  * @author Gleamrise
  * <br/>Created: 2023/10/06
  */
-@Entity(tableName = "todo_item")
+@Entity(tableName = "todo_item", )
+@JsonClass(generateAdapter = true)
 data class TodoItem(
+
     /** 主键，为创建时的时间 */
     @PrimaryKey val id: Long,
 
     /** 标题 */
     var title: String,
+
     /** 描述 */
     var description: String,
 
