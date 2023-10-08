@@ -1,4 +1,4 @@
-package cn.niu.taskmaster.entity.convert
+package cn.niu.taskmaster.room.convert
 
 import androidx.room.TypeConverter
 import com.li.utils.framework.ext.common.fromJson

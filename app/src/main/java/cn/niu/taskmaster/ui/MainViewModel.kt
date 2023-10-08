@@ -1,15 +1,21 @@
 package cn.niu.taskmaster.ui
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
-import cn.niu.taskmaster.entity.TodoItem
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.delay
+import androidx.lifecycle.viewModelScope
+import cn.niu.taskmaster.adapter.TodoAdapter
+import cn.niu.taskmaster.constant.VALUE_INT_NOT_INITIALIZED
+import cn.niu.taskmaster.constant.VALUE_LONG_NOT_INITIALIZED
+import cn.niu.taskmaster.network.ApiManager
+import cn.niu.taskmaster.room.entity.TodoItem
+import cn.niu.taskmaster.room.RoomManager
+import cn.niu.taskmaster.util.TodoUtils
+import com.li.utils.LiUtilsApp
+import com.li.utils.framework.ext.coroutine.launchIO
+import com.li.utils.framework.ext.coroutine.launchMain
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 /**
  *
@@ -23,63 +29,162 @@ class MainViewModel : ViewModel() {
         private const val TAG = "MainViewModel"
     }
 
-    // 过期的
-    private val _expiredTodo = MutableStateFlow<MutableList<TodoItem>>(mutableListOf())
-    val expiredTodo = _expiredTodo.asStateFlow()
+    var uncompletedAdapter: TodoAdapter? = null
 
-    // 今天的
-    private val _todayTodo = MutableStateFlow<MutableList<TodoItem>>(mutableListOf())
-    val todayIdo = _todayTodo.asStateFlow()
-
-    // 明天的
-    private val _tomorrowTodo = MutableStateFlow<MutableList<TodoItem>>(mutableListOf())
-    val tomorrowTodo = _expiredTodo.asStateFlow()
-
-    // 没有时间的
-    private val _noDateTodo = MutableStateFlow<MutableList<TodoItem>>(mutableListOf())
-    val noDateTodo = _noDateTodo.asStateFlow()
-
-    // 已完成的
-    private val _completedTodo = MutableStateFlow<MutableList<TodoItem>>(mutableListOf())
-    val completedTodo = _completedTodo.asStateFlow()
+    var completeAdapter: TodoAdapter? = null
 
 
-
-    fun addTodoItem(items: MutableStateFlow<MutableList<TodoItem>>, item: TodoItem) {
-        items.update {
-            (it + item) as MutableList<TodoItem>
-        }
-    }
-
-    fun removeTodoItem(items: MutableStateFlow<MutableList<TodoItem>>, item: TodoItem) {
-        items.update {
-            (it - item) as MutableList<TodoItem>
-        }
-    }
-
-    fun updateTodoItem(items: MutableStateFlow<MutableList<TodoItem>>, item: TodoItem) {
-        items.update {
-            it.find {
-                item.id == it.id
+    fun initAdapterData() {
+        viewModelScope.launchIO {
+            val completed = mutableListOf<TodoItem>()
+            val uncompleted = mutableListOf<TodoItem>()
+            RoomManager.todoDao.getAllTodoItems().forEach {
+                (if (it.completed) completed else uncompleted).add(it)
             }
-            MutableList(it.size) { i ->
-                it[i]
+            val comparator = Comparator<TodoItem> { a, b ->
+                val ai = TodoUtils.checkInitialized(a.deadline)
+                val bi = TodoUtils.checkInitialized(b.deadline)
+                return@Comparator if (ai && bi) (a.deadline - b.deadline).toInt()
+                else if (ai) {
+                    -1
+                } else if (bi) {
+                    1
+                } else 0
+            }
+
+            completed.sortWith(comparator)
+            uncompleted.sortWith(comparator)
+            launchMain {
+                completeAdapter?.swapData(completed)
+                uncompletedAdapter?.swapData(uncompleted)
             }
         }
     }
+
+
+    fun swapItem(item: TodoItem) {
+        val moved: TodoItem = item
+        completeAdapter?.addItem(item)
+        uncompletedAdapter?.removeItem(item)
+        updateLocalItem(moved)
+    }
+    fun swapItemTo(complete: Boolean, position: Int) {
+        var moved: TodoItem? = null
+        if (complete) {
+            val item = uncompletedAdapter?.getItem(position)?.also { moved = it }
+            uncompletedAdapter?.removeItem(position)
+            completeAdapter?.addItem(item!!)
+        } else {
+            val item = completeAdapter?.getItem(position)?.also { moved = it }
+            completeAdapter?.removeItem(position)
+            uncompletedAdapter?.addItem(item!!)
+        }
+        moved?.let { updateLocalItem(it) }
+    }
+
+
+    fun removeItemAt(complete: Boolean, position: Int) {
+        val removed: TodoItem?
+        if (complete) {
+            removed = completeAdapter?.getItem(position)
+            completeAdapter?.removeItem(position)
+
+        } else {
+            removed = uncompletedAdapter?.getItem(position)
+            uncompletedAdapter?.removeItem(position)
+        }
+        if (removed != null) {
+            removeLocalItem(removed)
+            TodoUtils.cancelNotifyWorker(LiUtilsApp.application, removed)
+        }
+
+    }
+
+    fun addItem(item: TodoItem) {
+        uncompletedAdapter?.addItem(item)
+        addLocalItem(item)
+        TodoUtils.startNotifyWorker(LiUtilsApp.application, item)
+    }
+
+
+    fun updateItem(item: TodoItem) {
+        if (item.completed) {
+            completeAdapter?.updateItem(item)
+        } else {
+            uncompletedAdapter?.updateItem(item)
+        }
+        updateLocalItem(item)
+        TodoUtils.cancelNotifyWorker(LiUtilsApp.application, item)
+        TodoUtils.startNotifyWorker(LiUtilsApp.application, item)
+
+    }
+
+
+    private fun addLocalItem(item: TodoItem) {
+        viewModelScope.launchIO {
+            RoomManager.todoDao.addTodoItem(item)
+        }
+    }
+
+
+    private fun updateLocalItem(item: TodoItem) {
+        viewModelScope.launchIO {
+            RoomManager.todoDao.updateTodoItem(item)
+        }
+    }
+
+    private fun removeLocalItem(item: TodoItem) {
+        viewModelScope.launchIO {
+            RoomManager.todoDao.deleteTodoItem(item)
+        }
+    }
+
+
+
 
     // ==================================================================================
 
     var tmpAddTodoItem: TodoItem? = null
-        private set
+
+
+    fun resetTmpAddTodoItem() {
+        tmpAddTodoItem = null
+    }
 
     fun setTmpAddTodoItem(
         title: String = "",
         description: String = "",
-
+        deadline: Long = VALUE_LONG_NOT_INITIALIZED,
+        priority: Int = VALUE_INT_NOT_INITIALIZED,
+        repeatMode: Int = VALUE_INT_NOT_INITIALIZED
     ) {
+        tmpAddTodoItem = TodoUtils.getTodoItem(
+            title,
+            description,
+            deadline,
+            priority,
+            repeatMode
+        )
 
     }
+
+    // ==============================================================================
+
+    var currentItemInfo: TodoItem? = null
+
+
+    private val _caption = MutableStateFlow("")
+    val caption = _caption.asStateFlow()
+    // 获取配文
+    fun getCaption() {
+        viewModelScope.launch {
+            launchIO {
+                val res = ApiManager.yiyanApi.getSentence("a", 10, 20)
+                _caption.value = res
+            }
+        }
+    }
+
 
 }
 

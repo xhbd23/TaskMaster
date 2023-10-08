@@ -1,18 +1,23 @@
 package cn.niu.taskmaster.ui
 
+import android.animation.ObjectAnimator
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.ViewGroup
-import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import cn.niu.taskmaster.R
-import cn.niu.taskmaster.adapter.TodoRecyclerAdapter
+import cn.niu.taskmaster.adapter.ItemSwipeHelper
+import cn.niu.taskmaster.adapter.TodoAdapter
 import cn.niu.taskmaster.databinding.FragmentTodoBinding
-import cn.niu.taskmaster.entity.TodoItem
+import cn.niu.taskmaster.databinding.LayoutTodoPartBinding
 import com.li.utils.framework.base.fragment.BaseMvvmFragment
-import com.li.utils.framework.ext.coroutine.launchOnCreated
-import com.li.utils.framework.ext.coroutine.launchOnResume
+import com.li.utils.framework.ext.common.asNotNull
 import com.li.utils.framework.ext.res.string
+import com.sll.lib_framework.ext.view.click
+import com.sll.lib_framework.ext.view.gone
+import com.sll.lib_framework.ext.view.visible
 import kotlinx.coroutines.launch
 
 /**
@@ -27,16 +32,10 @@ class TodoFragment: BaseMvvmFragment<FragmentTodoBinding, MainViewModel>() {
         private const val TAG = "TodoFragment"
     }
 
-    private var expiredAdapter: TodoRecyclerAdapter? = null
 
-    private var todayAdapter: TodoRecyclerAdapter? = null
+    private lateinit var uncompletedAdapter: TodoAdapter
 
-    private var tomorrowAdapter: TodoRecyclerAdapter? = null
-
-    private var noDateAdapter: TodoRecyclerAdapter? = null
-
-    private var completedAdapter: TodoRecyclerAdapter? = null
-
+    private lateinit var completedAdapter: TodoAdapter
 
     override fun onDefCreateView(
         inflater: LayoutInflater,
@@ -44,6 +43,7 @@ class TodoFragment: BaseMvvmFragment<FragmentTodoBinding, MainViewModel>() {
         savedInstanceState: Bundle?
     ) {
         init()
+        binding.searchViewTop.gone()
     }
 
     override fun initViewBinding(
@@ -59,35 +59,85 @@ class TodoFragment: BaseMvvmFragment<FragmentTodoBinding, MainViewModel>() {
     }
 
     private fun initViews() {
+        uncompletedAdapter = TodoAdapter(requireContext(), mutableListOf(), viewModel).also { viewModel.uncompletedAdapter = it }
+        completedAdapter = TodoAdapter(requireContext(), mutableListOf(), viewModel).also { viewModel.completeAdapter = it}
         binding.apply {
-            includeExpired.apply {
-                tvTitle.text = string(R.string.expired)
+            includeUncompleted.apply {
+                tvTitle.text = string(R.string.uncompleted)
                 recyclerView.apply {
-                    layoutManager = LinearLayoutManager(context).apply { orientation = LinearLayoutManager.VERTICAL }
+                    layoutManager = object: LinearLayoutManager(context) {
+                        override fun canScrollVertically(): Boolean = false
+                    }.apply { orientation = LinearLayoutManager.VERTICAL }
+                    adapter = uncompletedAdapter
+
+                    val callback = ItemSwipeHelper(uncompletedAdapter, requireContext(), ItemSwipeHelper.TYPE_UNCOMPLETED).apply {
+                        setOnItemUncompletedListener(object : ItemSwipeHelper.OnItemUncompletedListener {
+                            override fun onDelete(position: Int) {
+                                viewModel.removeItemAt(false, position)
+                                Log.i(TAG, "uncompleted onDelete: $position")
+                            }
+
+                            override fun onCompleted(position: Int) {
+                                Log.i(TAG, "uncompleted onCompleted: $this")
+                                uncompletedAdapter.getItem(position)?.apply {
+                                    completed = true
+                                    viewModel.swapItemTo(true, position)
+                                }
+                            }
+                        })
+                    }
+                    val touchHelper = ItemTouchHelper(callback)
+                    touchHelper.attachToRecyclerView(this)
+                    uncompletedAdapter.onItemClickListener = {
+                        viewModel.tmpAddTodoItem = it
+                        requireActivity().asNotNull<MainActivity>().showBottomAddFragment(true)
+                    }
                 }
-            }
-            includeToday.apply {
-                tvTitle.text = string(R.string.today)
-                recyclerView.apply {
-                    layoutManager = LinearLayoutManager(context).apply { orientation = LinearLayoutManager.VERTICAL }
+
+
+                var expanded = true
+                ivPopup.click {
+                    expanded = !expanded
+                    setTodoListExpanded(expanded, this)
                 }
+
             }
-            includeTomorrow.apply {
-                tvTitle.text = string(R.string.tomorrow)
-                recyclerView.apply {
-                    layoutManager = LinearLayoutManager(context).apply { orientation = LinearLayoutManager.VERTICAL }
-                }
-            }
-            includeNoDate.apply {
-                tvTitle.text = string(R.string.no_date)
-                recyclerView.apply {
-                    layoutManager = LinearLayoutManager(context).apply { orientation = LinearLayoutManager.VERTICAL }
-                }
-            }
+
+
             includeCompleted.apply {
                 tvTitle.text = string(R.string.completed)
                 recyclerView.apply {
-                    layoutManager = LinearLayoutManager(context).apply { orientation = LinearLayoutManager.VERTICAL }
+                    layoutManager = object : LinearLayoutManager(context) {
+                        override fun canScrollVertically(): Boolean = false
+                    }.apply { orientation = LinearLayoutManager.VERTICAL }
+                    adapter = completedAdapter
+
+                    val callback = ItemSwipeHelper(completedAdapter, requireContext(), ItemSwipeHelper.TYPE_COMPLETE).apply {
+                        setOnItemCompleteListener(object : ItemSwipeHelper.OnItemCompleteListener {
+                            override fun onDelete(position: Int) {
+                                viewModel.removeItemAt(true, position)
+                                Log.i(TAG, "completed onDelete: $position")
+                            }
+
+                            override fun onReset(position: Int) {
+                                completedAdapter.getItem(position)?.apply {
+                                    completed = false
+                                    viewModel.swapItemTo(false, position)
+                                }
+                            }
+                        })
+                    }
+                    val touchHelper = ItemTouchHelper(callback)
+                    touchHelper.attachToRecyclerView(this)
+                    completedAdapter.onItemClickListener = {
+                        viewModel.tmpAddTodoItem = it
+                        requireActivity().asNotNull<MainActivity>().showBottomAddFragment(true)
+                    }
+                }
+                var expanded = true
+                ivPopup.click {
+                    expanded = !expanded
+                    setTodoListExpanded(expanded, this)
                 }
             }
         }
@@ -95,22 +145,20 @@ class TodoFragment: BaseMvvmFragment<FragmentTodoBinding, MainViewModel>() {
 
 
     private fun initData() {
-        viewModel.apply {
-            launchOnCreated {
-                launch {
-                    viewModel.expiredTodo.collect {
-                        if (it.size == 0) {
-
-                        }
-                    }
-                }
-            }
-        }
+        viewModel.initAdapterData()
     }
 
-    private fun updateAdapter(adapter: TodoRecyclerAdapter, items: MutableList<TodoItem>) {
-        if (items.size == 0) {
 
+    private fun setTodoListExpanded(expand: Boolean, include: LayoutTodoPartBinding) {
+        // 默认为展开的状态
+        if (expand) {
+            include.ivPopup.rotation = 180f
+            include.ivPopup.tag = false
+            include.recyclerView.gone()
+        } else {
+            include.ivPopup.rotation = 0f
+            include.ivPopup.tag = true
+            include.recyclerView.visible()
         }
     }
 

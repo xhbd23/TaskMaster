@@ -6,7 +6,8 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
-import cn.niu.taskmaster.entity.TodoItem
+import cn.niu.taskmaster.room.entity.TodoItem
+import kotlinx.coroutines.flow.Flow
 
 /**
  *
@@ -37,16 +38,22 @@ interface TodoDao {
     suspend fun updateTodoItems(items: List<TodoItem>)
 
     /**
+     * 查询所有实体
+     * */
+    @Query("SELECT * FROM todo_item")
+    suspend fun getAllTodoItems(): List<TodoItem>
+
+    /**
      * 通过 [date] 查找所有的实体
      * */
-    @Query("SELECT * FROM todo_item WHERE :date == create_date")
-    suspend fun getTodoItemsByDate(date: Long): List<TodoItem>
+    @Query("SELECT * FROM todo_item WHERE :date <= deadline AND deadline <= :date + 1000*60*60*24")
+     fun getTodoItemsByDate(date: Long): Flow<List<TodoItem>>
 
     /**
      * 通过 [completed] 查找相关实体
      * */
     @Query("SELECT * FROM todo_item WHERE :completed")
-    suspend fun getTodoItemsByCompleted(completed: Boolean): List<TodoItem>
+    fun getTodoItemsByCompleted(completed: Boolean):  Flow<List<TodoItem>>
 
     /**
      * 通过 [[fromDate], [toDate]] 查找相关实体
@@ -55,10 +62,10 @@ interface TodoDao {
         "SELECT * FROM todo_item " +
         "WHERE :fromDate <= create_date AND create_date <= :toDate"
     )
-    suspend fun getTodoItemsByCompleted(fromDate: Long, toDate: Long): List<TodoItem>
+    fun getTodoItemsByCompleted(fromDate: Long, toDate: Long): Flow<List<TodoItem>>
 
 
     @Query("SELECT * FROM todo_item WHERE :priority == priority")
-    suspend fun getTodoItemsByPriority(priority: Int): List<TodoItem>
+    fun getTodoItemsByPriority(priority: Int):  Flow<List<TodoItem>>
 
 }
